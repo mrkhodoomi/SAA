@@ -1,0 +1,104 @@
+import numpy as np
+import gurobipy as gp
+from gurobipy import GRB
+import matplotlib.pyplot as plt
+
+N_seq = [10, 50, 100, 200, 500]
+M = 10
+Nprim = 10000
+alpha = 0.05
+
+LB_seq = np.zeros(len(N_seq))
+LB_me_seq = np.zeros(len(N_seq))
+LB_ci_up_seq = np.zeros(len(N_seq))
+LB_ci_low_seq = np.zeros(len(N_seq))
+
+UB_seq = np.zeros(len(N_seq))
+UB_me_seq = np.zeros(len(N_seq))
+UB_ci_up_seq = np.zeros(len(N_seq))
+UB_ci_low_seq = np.zeros(len(N_seq))
+
+for s, N in enumerate(N_seq):
+    print(f"######################## Sample size ({N}) ########################")
+    LB_obj = np.zeros(M)
+    UB_obj = np.zeros(M)
+
+    for j in range(M):
+        ######## getting the lower bound ########
+        xi1 = np.random.uniform(-0.8, 0.8, N)
+        xi2 = np.random.normal(scale=np.sqrt(12), size=N)
+        xi3 = -2.5 * np.log(np.random.rand(N))
+        xi4 = np.random.normal(scale=3, size=N)
+
+        m = gp.Model("Lower_Bound")
+        x = m.addVars(2, name="x", lb=0)
+        y = m.addVars(N, 2, name="y", lb=0)
+        m.setObjective(2 * x[0] + 3 * x[1] + (1 / N) * sum(7 * y[k, 0] + 12 * y[k, 1] for k in range(N)), GRB.MINIMIZE)
+
+        m.addConstr(x[0] + x[1] <= 100)
+
+        for k in range(N):
+            m.addConstr(y[k, 0] >= 180 + xi2[k] - 6 * x[1] - (2 + xi1[k]) * x[0])
+            m.addConstr(y[k, 1] >= 162 + xi4[k] - 3 * x[0] - (3.4 - xi3[k]) * x[1])
+
+        m.optimize()
+        xval = np.array([x[i].x for i in range(2)])
+        LB_exp = m.objVal
+        LB_obj[j] = LB_exp
+
+        ######## getting the Upper bound ########
+        xixi1 = np.random.uniform(-0.8, 0.8, Nprim)
+        xixi2 = np.random.normal(scale=np.sqrt(12), size=Nprim)
+        xixi3 = -2.5 * np.log(np.random.rand(Nprim))
+        xixi4 = np.random.normal(scale=3, size=Nprim)
+
+        m = gp.Model("Upper_Bound")
+        y = m.addVars(Nprim, 2, name="y", lb=0)
+        m.setObjective(2 * xval[0] + 3 * xval[1] + (1 / Nprim) * sum(7 * y[k, 0] + 12 * y[k, 1] for k in range(Nprim)),
+                       GRB.MINIMIZE)
+
+        for kk in range(Nprim):
+            m.addConstr(y[kk, 0] >= 180 + xixi2[kk] - 6 * xval[1] - (2 + xixi1[kk]) * xval[0])
+            m.addConstr(y[kk, 1] >= 162 + xixi4[kk] - 3 * xval[0] - (3.4 - xixi3[kk]) * xval[1])
+
+        m.optimize()
+        UB_exp = m.objVal
+        UB_obj[j] = UB_exp
+
+  ######################## LB confidence interval calculation ########################
+    LB_seq[s] = np.mean(LB_obj)
+    print("Lower Bound =", LB_seq[s])
+    LB_var = np.var(LB_obj, ddof=1)
+    print("Lower Bound Variance =", LB_var)
+    # marginal error
+    LB_me = (np.percentile(np.random.normal(), 1 - alpha) * (LB_var) ** 0.5) / (M ** 0.5)
+    LB_ci_up_seq[s] = LB_seq[s] + LB_me
+    LB_ci_low_seq[s] = LB_seq[s] - LB_me
+    print("CI of Lower Bound = [", LB_ci_low_seq[s], " , ", LB_ci_up_seq[s], "]")
+
+    ######################## UB confidence interval calculation ########################
+    UB_seq[s] = np.mean(UB_obj)
+    print("Upper Bound =", UB_seq[s])
+    UB_var = np.var(UB_obj, ddof=1)
+    print("Upper Bound Variance =", UB_var)
+    # marginal error
+    UB_me = (np.percentile(np.random.normal(), 1 - alpha) * (UB_var) ** 0.5) / (M ** 0.5)
+    UB_ci_up_seq[s] = UB_seq[s] + UB_me
+    UB_ci_low_seq[s] = UB_seq[s] - UB_me
+    print("CI of Upper Bound= [", UB_ci_low_seq[s], " , ", UB_ci_up_seq[s], "]")
+
+# plot of the final results
+plt.plot(range(1, len(N_seq) + 1), LB_seq, marker='o', label='Lower Bound', color='red')
+plt.fill_between(range(1, len(N_seq) + 1), LB_ci_low_seq, LB_ci_up_seq, color='red', alpha=0.2)
+
+plt.plot(range(1, len(N_seq) + 1), UB_seq, marker='o', label='Upper Bound', color='blue')
+plt.fill_between(range(1, len(N_seq) + 1), UB_ci_low_seq, UB_ci_up_seq, color='blue', alpha=0.2)
+
+plt.xlabel('Sample Size Index')
+plt.ylabel('Objective Value')
+plt.legend()
+
+# Set x-axis ticks explicitly
+plt.xticks(range(1, len(N_seq) + 1), N_seq)
+
+plt.show()
